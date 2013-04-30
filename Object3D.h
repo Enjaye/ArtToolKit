@@ -2,6 +2,7 @@
 #define OBJECT_H
 
 #include <stdio.h>
+#include "differ.h"
 
 class MeshObj;
 

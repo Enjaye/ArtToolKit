@@ -1,20 +1,15 @@
 /**===================================================================================================================
-    Nom du projet: ARTOOLKIT_move
-    But: faire bouger une sphere, cube, ours, autre, selectionner avec la souris en realite augmentee
+    Nom du projet: Lego
+    But: faire bouger une sphere, cube, ours, autre, selectionner et bougé avec les mains en realite augmentee
 
-    Derniere maj: 25/04/2013 
-    Par: Angélique
+    Derniere maj: 28/04/2013 
+    Par: Florian
 
     Erreurs de compilation : 0
 
     TODO list par ordre de priorité:
 		- Affiner le redimensionnement via les couleurs
-		- Intéraction couleur : Suppression d'un objet selectionné
-		- Rajout d'élément IHM : Bouton pour lecture d'un code en RA
-		- Rajout d'élément IHM : Bouton "d'aide" affichant des pictogrammes pour les mouvements possibles, en RA
-		(Pour les deux derniers à partir du moment où on peut detecter la colision sur un objet, c'est bon, sinon, pour éviter des conflits
-		entre les boutons ihm et les objets, on peut juste définir des zones correspondant et mettre un timer 'si l'index et le majeur sont plus de 2sc
-		sur telle zone, alors on ouvre l'aide, etc)
+
 		- Intéraction couleur : Rotation de l'objet (Un algortihme devrait nous être fourni par un ami à moi)
 		- Intéraction couleur : Detection de collision entre nos objets (juste une seconde fonction de colision, sauf qu'on fait objet/objet)
 		- Intéraction couleur : Rajout d'une inertie gravitationnelle
@@ -24,6 +19,15 @@
 		- Début du redimmensionnement via suivi des couleurs => à affiner
 		- Code à trou pour les rotations
 		Tout ce beau monde se trouve dans la fonction interactions ligne 839
+
+		- ajout Bouton pour lecture d'un code
+		- ajout d'élément IHM : Bouton "d'aide" affichant des pictogrammes pour les mouvements possibles
+		- ajout de timer sur les boutton ( faut tenir 2sec dessus pour les activer )
+		- ajout boutton quitter
+		- ajout son cours pour les boutton precedement cité
+		- le mouvement utilisé pour la partie precedente est juste l'interaction d'une des 3 couleur sur les bouttons
+		- ajout interaction supprimer: majeur + index 2sec sur objet
+
 
     Autres :
         Fonctions du code actuel :
@@ -74,10 +78,18 @@
 #include <OPENCV/highgui.h>
 #include <OPENCV/cv.h>
 
+//#include <FMOD/fmod.h>
+
+
 #include "MeshObj.h"
 #include "Enums.hpp"
 #include "Color.hpp"
 #include "Object3D.h"
+#include "loadtexture.h"
+#include "hud.h"
+#include "bouttonHud.h"
+#include "differ.h"
+
 
 
 ///===================================================================================================================
@@ -131,7 +143,7 @@ bool visible = false; // variable qui permet de savoir si on a vu le patron ou p
 int alterne1 = 0; //variable  permettant d'afficher 1 des 3 texte pour un effet d'animation 
 int alterne2 = 0; //variable  permettant d'afficher 1 des 3 texte pour un effet d'animation 
 int id_obj =0; // peut prendre valeur 1 2 ou 3   1= patron 1; 2=patron 2 ; 3= patron + patronn 2 -> permet de bouger les bons objets. utiliser pouir le deplacement/selection objet
-int shift =0; //savoir si shift pressé ou non, utiliser pouir le deplacement/selection objet
+int shift;
 
 //patron 1 = hiro 
 //patron 2 = kanji
@@ -140,10 +152,30 @@ int shift =0; //savoir si shift pressé ou non, utiliser pouir le deplacement/sel
 static bool calib = true, colide = false;
 int couleur = 0, nbPixels;
 
+//boutton, son de l'interface graphique
+bool menuShow;
+
+hud menu; //hud menu
+hud scan; //boutton scan
+hud help; //bouton aide
+hud quit;//boutton quiter
+
+differ difScan; //bouton scan
+differ difAide; //boutton aide
+differ difQuit; //boutton quit
+
+/*FMOD_SYSTEM *systemSon;
+FMOD_SOUND *clickDown;
+FMOD_SOUND *clickUP;*/
+
+
 IplImage *image;
 Color pouce(POUCE), index(INDEX), majeur(MAJEUR);
 CvPoint poucePos, indexPos, majeurPos, pouceNextPos, indexNextPos, majeurNextPos;
 
+//timer interacion
+differ difIndex;
+differ difMajeur;
 
 ///===================================================================================================================
 /// Declaration des fonctions
@@ -151,7 +183,6 @@ CvPoint poucePos, indexPos, majeurPos, pouceNextPos, indexNextPos, majeurNextPos
 
 /// Fonctions de dessin de base 
 void texte( void *font, char* texte,int x, int y);		/// Dessine un texte et place le caractere de debut de la chaine a la position (x,y)
-
 
 /// Fonctions ARToolKit
 void arInit();                                          /// Initialisation d'ARToolKit et de la camera
@@ -176,11 +207,15 @@ void mouseMove(int x, int y);                           /// Mouvement de la sour
 int gl_select2(int x, int y);						/// Procedure de selection (marche presque :( )
 void detectColision();									/// Procédure de détection des colisions
 void updateColor();									// Mise à jour des barycentres
-void	interactions();								// Exécute les intéractions en fonction des couleurs sur l'objet
+void interactions();								// Exécute les intéractions en fonction des couleurs sur l'objet
+
+void interactionBoutton();	// Exécute les intéractions en fonction des couleurs sur les bouttons
 
 ///===================================================================================================================
 /// Fonctions de dessin :
 ///     - texte(void *font, char* texte, int x, int y)
+///		
+///
 ///===================================================================================================================
 
 
@@ -197,6 +232,8 @@ void texte( void *font, char* texte,int x, int y)
 
 }
 
+
+//charge toutes les textures voulu
 ///===================================================================================================================
 /// Fonctions ARToolKit :
 ///     - void arInit();
@@ -240,11 +277,9 @@ void arInit()
         }
     }
 
-	try
-	{
-		 argInit( &cparam, 1.0, 0, 0, 0, 0 );
-	}
-	catch(...){}
+
+	argInit( &cparam, 1.0, 0, 0, 0, 0 );
+	
 	glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
 
@@ -260,10 +295,13 @@ void arInit()
 ///===================================================================================================================
 static void cleanup()
 {
-	cvReleaseImage(&image);
+	printf("Extinction \n");
     arVideoCapStop();
     arVideoClose();
     argCleanup();
+	/*FMOD_System_Close(systemSon);
+	FMOD_System_Release(systemSon);*/
+	exit(0);
 }
 
 
@@ -277,7 +315,8 @@ void mainLoop()
     ARUint8 *dataPtr;
     int marker_num;
 
-	cvReleaseImage(&image);
+	if(!calib)//special paycay florian 
+		cvReleaseImage(&image);
 
 	if(!calib)
 		detectColision();
@@ -303,14 +342,16 @@ void mainLoop()
 
 	//test si les couleurs ont déjà été calibrée
 	// si oui on teste si y a collision, sinon on calibre
-    if(calib)
-		calibrage();
-	else
-	{
-		updateColor();
-		interactions();
-	}
+		interactionBoutton();
+		if(calib)
+			calibrage();
+		else
+		{
+			updateColor();
+			interactions();
+		}
 
+			
 
     // affichage image à l'ecran
     argDispImage( (unsigned char *)image->imageData, 0,0 );
@@ -326,43 +367,65 @@ void mainLoop()
 
 		if(visible == false && !calib) //element IHM : procedure qui permet de savoir si on recherche ou pas + réinit mouvemment des objets précédement affiché
 		{
+			glEnable(GL_LIGHT0);
+
 			objet1_x =0;objet1_y =0;objet2_x =0;objet2_y =0;
 
+			if(scan.isVisible(0)==true)
+				scan.setVisible(false,0);
+			if(scan.isVisible(1)==false)
+				scan.setVisible(true,1);
 
 			glColor3ub(255,0,0);
-			texte(GLUT_BITMAP_HELVETICA_18,(char*)"Recherche en cours",cparam.xsize-200,cparam.ysize-30);
+			texte(GLUT_BITMAP_HELVETICA_18,(char*)"Searching",cparam.xsize-100,cparam.ysize-30);
 			if(alterne1==0 && alterne2 > 20)
 			{
-				texte(GLUT_BITMAP_HELVETICA_18,(char*)"Recherche en cours .",cparam.xsize-200,cparam.ysize-30);
+				glColor3ub(255,0,0);
+				texte(GLUT_BITMAP_HELVETICA_18,(char*)"Searching .",cparam.xsize-100,cparam.ysize-30);
 				if(alterne2 > 30){alterne2=0;alterne1=(alterne1+1)%3;}
 			}
 			if(alterne1==1 && alterne2 > 20 )
 			{	
-				texte(GLUT_BITMAP_HELVETICA_18,(char*)"Recherche en cours ..",cparam.xsize-200,cparam.ysize-30);
+				glColor3ub(255,0,0);
+				texte(GLUT_BITMAP_HELVETICA_18,(char*)"Searching ..",cparam.xsize-100,cparam.ysize-30);
 				if(alterne2 > 30){alterne2=0;alterne1=(alterne1+1)%3;}
 			}
 			if(alterne1==2 && alterne2 > 20)
 			{	
-				texte(GLUT_BITMAP_HELVETICA_18,(char*)"Recherche en cours ...",cparam.xsize-200,cparam.ysize-30);
+				glColor3ub(255,0,0);
+				texte(GLUT_BITMAP_HELVETICA_18,(char*)"Searching ...",cparam.xsize-100,cparam.ysize-30);
 				if(alterne2 > 30){alterne2=0;alterne1=(alterne1+1)%3;}
 			}
 
 			alterne2+=1;
+			glDisable(GL_LIGHT0);
 		}
 		else if(calib)
 		{
+			
 			if(couleur == 0)
 			{
-				texte(GLUT_BITMAP_HELVETICA_18,(char*)"Cliquez sur la couleur du pouce",cparam.xsize-300,cparam.ysize-30);
+				glColor3ub(0,0,255);
+				texte(GLUT_BITMAP_HELVETICA_18,(char*)"Choose thumb's color",cparam.xsize-220,cparam.ysize-30);
+				texte(GLUT_BITMAP_HELVETICA_18,(char*)"then press enter",cparam.xsize-220,cparam.ysize-(30+18));
 			}
 			else if(couleur == 1)
 			{
-				texte(GLUT_BITMAP_HELVETICA_18,(char*)"Cliquez sur la couleur de l'index",cparam.xsize-300,cparam.ysize-30);
+				glColor3ub(0,255,0);
+				texte(GLUT_BITMAP_HELVETICA_18,(char*)"Choose forefinger's color",cparam.xsize-220,cparam.ysize-30);
+				texte(GLUT_BITMAP_HELVETICA_18,(char*)"then press enter",cparam.xsize-220,cparam.ysize-(30+18));
+				texte(GLUT_BITMAP_HELVETICA_18,(char*)"Press return for thumb",cparam.xsize-220,cparam.ysize-(30+18*2));
 			}
 			else
 			{
-				texte(GLUT_BITMAP_HELVETICA_18,(char*)"Cliquez sur la couleur du majeur",cparam.xsize-300,cparam.ysize-30);
+				glColor3ub(255,0,0);
+				texte(GLUT_BITMAP_HELVETICA_18,(char*)"Choose middle's color",cparam.xsize-220,cparam.ysize-(30));
+				texte(GLUT_BITMAP_HELVETICA_18,(char*)"then press enter",cparam.xsize-220,cparam.ysize-(30+18));
+				texte(GLUT_BITMAP_HELVETICA_18,(char*)"Press return for forefinger",cparam.xsize-220,cparam.ysize-(30+18*2));
+
 			}
+
+
 		}
 		else //passage mode 3d + init profondeur
 		{
@@ -405,7 +468,14 @@ void mainLoop()
 					printf("object[%d] hd[%f, %f]\n", i, marker_info->vertex[1][0], marker_info->vertex[1][1]);
 					printf("object[%d] bg[%f, %f]\n", i, marker_info->vertex[2][0], marker_info->vertex[2][1]);
 					printf("object[%d] bd[%f, %f]\n", i, marker_info->vertex[3][0], marker_info->vertex[3][1]);
-					
+
+
+					//changement etat boutton
+					if(scan.isVisible(0)==false)
+						scan.setVisible(true,0);
+					if(scan.isVisible(1)==true)
+						scan.setVisible(false,1);
+
 					//si on a vu un patron, on créé une nouvelle instance de l'objet créé par le patron, qu'on stocke dans les objets à l'écran.
 					onscreen_object.push_back(Object3D(mesh.at(object[i].model_id), object[i].center, object[i].trans, object[i].width));
 				}
@@ -415,8 +485,17 @@ void mainLoop()
 		//vu qu'on ne gère plus à partir de la variable "visible" d'un patron, on display, dans tout les cas, soit le vecteur est vide, soit 
 		//on a un ou plusieurs objets à afficher
 		display(true);
-			
-	
+
+		if(menuShow==true)
+			menu.show();
+
+		if(!calib)
+			scan.show();
+
+		help.show();
+		quit.show();
+
+
     argSwapBuffers(); /// Affichage de l'image sur l'interface graphique
 }
 
@@ -543,7 +622,7 @@ void calibrage()
 			pouce.addObjectToVideo(image, pouceNextPos, nbPixels, poucePos);
 			index.addObjectToVideo(image, indexNextPos, nbPixels, indexPos);
 			majeur.addObjectToVideo(image, majeurNextPos, nbPixels, majeurPos);
-		}	   
+		}
 }
 
 //Pour changer la couleur d'un doigt, rencontre un soucis par moment, mais qui ne crash pas le programme, donc non prioritaire
@@ -624,6 +703,7 @@ static void display(bool d_screen)
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
 
+	
    //alumer Lumieres : il ne faut pas les activer en mode Picking, car on se base sur la couleur de l'objet dans ce mode, et l'activation
    // des lumières ajouterais des ombres et fausserait la sélection
    if(d_screen)
@@ -663,7 +743,9 @@ static void display(bool d_screen)
 				onscreen_object.at(i).draw(false);
 			}
 			else
+			{	
 				onscreen_object.at(i).draw(true);
+			}
 	}
 
     glDisable(GL_LIGHTING);
@@ -816,12 +898,18 @@ void detectColision()
 	if(object_pouce > -1)
 		onscreen_object.at(object_pouce).setDoigt(1);
 
-	if(object_index >-1)
+	if(object_index >-1)	
 		onscreen_object.at(object_index).setDoigt(2);
+	else
+		difIndex.stop();
 
-	if(object_majeur >-1)
+	if(object_majeur >-1)	
 		onscreen_object.at(object_majeur).setDoigt(4);
+	else
+		difMajeur.stop();
+	
 }
+
 
 
 //simple mise à jour de la position des doigts
@@ -836,7 +924,7 @@ void updateColor()
 	majeur.addObjectToVideo(image, majeurNextPos, nbPixels, majeurPos);
 }
 
-void	interactions()
+void interactions()
 {
 	for(unsigned int i = 0; i < onscreen_object.size(); i++)
 	{
@@ -885,7 +973,19 @@ void	interactions()
 			}
 		break;
 
-		case 6: // majeur et index sur l'objet
+		case 6: // majeur et index sur l'objet: suppression objet
+			
+			//debut timer
+			difIndex.start();
+			difMajeur.start();
+			if(difIndex.isPassed() && difMajeur.isPassed())// si les 2 doigts ont été 2sec sur l'objet alors supression
+			{
+				difIndex.stop();
+				difMajeur.stop();
+				onscreen_object.erase(onscreen_object.begin()+i); //supression
+					
+			}
+
 		break;
 
 		case 7: // trois doigts sur l'objet : rotation de l'objet
@@ -918,22 +1018,137 @@ void	interactions()
 }
 
 
+
+void interactionBoutton()
+{
+		int px=pouce.getBarycentreX(); 
+		int py=pouce.getBarycentreY(); 
+
+		int ix=index.getBarycentreX();
+		int iy=index.getBarycentreY();
+
+		int mx=majeur.getBarycentreX();
+		int my=majeur.getBarycentreY();
+
+		//doigt sur bouton quitter ( 2sec pour quitter) 
+		if(quit.isOnBB(0,px,py,cparam.ysize) || quit.isOnBB(0,ix,iy,cparam.ysize) || quit.isOnBB(0,mx,my,cparam.ysize))
+		{	
+			if(!quit.isVisible(1))
+				//FMOD_System_PlaySound(systemSon, FMOD_CHANNEL_FREE, clickDown, 0, NULL);
+
+			quit.setVisible(true,1);
+			quit.setVisible(false,0);
+			difQuit.start();
+			if(difQuit.isPassed())
+			{	
+				//FMOD_System_PlaySound(systemSon, FMOD_CHANNEL_FREE, clickUP, 0, NULL);
+				cleanup();
+			}
+		}
+		else
+		{
+			difQuit.stop();
+			quit.setVisible(false,1);
+			quit.setVisible(true,0);
+		}
+
+		//doigt sur bouton scan ( 2sec pour lancer) 
+		if(scan.isOnBB(0,px,py,cparam.ysize) || scan.isOnBB(0,ix,iy,cparam.ysize) || scan.isOnBB(0,mx,my,cparam.ysize))
+		{	
+			if(!scan.isVisible(2))
+				//FMOD_System_PlaySound(systemSon, FMOD_CHANNEL_FREE, clickDown, 0, NULL);
+
+			scan.setVisible(true,2);
+			scan.setVisible(false,1);
+			scan.setVisible(false,0);
+			difScan.start();
+			if(difScan.isPassed())
+			{
+				scan.setVisible(true,1);
+				scan.setVisible(false,2);
+				scan.setVisible(false,0);
+				visible = false;
+				//FMOD_System_PlaySound(systemSon, FMOD_CHANNEL_FREE, clickUP, 0, NULL);
+			}
+		}
+		else
+		{
+			difScan.stop();
+			if(visible==false)
+			{
+				scan.setVisible(true,1);
+				scan.setVisible(false,0);
+				scan.setVisible(false,2);
+			}
+			else
+			{
+				scan.setVisible(true,0);
+				scan.setVisible(false,1);
+				scan.setVisible(false,2);
+			}
+
+		}
+
+		//doigt sur boutton aide ( 2sec pour lancer) 
+		if(help.isOnBB(0,px,py,cparam.ysize) || help.isOnBB(0,ix,iy,cparam.ysize) || help.isOnBB(0,mx,my,cparam.ysize))
+		{	
+			if(!help.isVisible(2))
+				//FMOD_System_PlaySound(systemSon, FMOD_CHANNEL_FREE, clickDown, 0, NULL);
+			
+			help.setVisible(true,2);
+			help.setVisible(false,0);
+			help.setVisible(false,1);
+			difAide.start();
+			if(difAide.isPassed())
+			{
+				help.setVisible(true,1);
+				help.setVisible(false,2);
+				help.setVisible(false,0);
+				
+				if(menuShow==true)
+					menuShow=false;
+				else
+					menuShow=true;
+
+				//FMOD_System_PlaySound(systemSon, FMOD_CHANNEL_FREE, clickUP, 0, NULL);
+			}
+		}
+		else
+		{
+			difAide.stop();
+			if(menuShow==true)
+			{
+				help.setVisible(true,1);
+				help.setVisible(false,0);
+				help.setVisible(false,2);
+			}
+			else
+			{
+				help.setVisible(true,0);
+				help.setVisible(false,1);
+				help.setVisible(false,2);
+			}
+			
+
+		}
+
+
+}
+
 ///===================================================================================================================
 /// Programme principal
 ///===================================================================================================================
 
 int main(int argc, char *argv[])
 {
+	printf("Debut initialisation\n");
     /// Chargement des objets
-	unsigned char  Rouge[3]={255,0,0};
-	unsigned char  Bleu[3]={0,0,255};
 	//on ne stocke plus dans des mesh, mais dans un tableau possible de mesh à charger. L'id du meche à charger par le patron correspond
 	//à l'indice dans le tableau de mesh
 	mesh.push_back(new MeshObj("Others\\legoTexture.obj",NULL));
-	mesh.push_back(new MeshObj("Others\\cube2.obj", NULL));
+	mesh.push_back(new MeshObj("Others\\brique_lego.obj", NULL));
 
 	printf("Chargement des objets réussi\n");
-	
     /// Initialisation de glut
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH);
@@ -953,7 +1168,46 @@ int main(int argc, char *argv[])
     glutPositionWindow((glutGet(GLUT_SCREEN_WIDTH)-cparam.xsize)/2, (glutGet(GLUT_SCREEN_HEIGHT)-cparam.ysize)/2);
     glutReshapeFunc(resize);
     glutMotionFunc(mouseMove);
-    argMainLoop(mouseClick, key, mainLoop);
+
+	//init du menu d'aide (aide mouvement)
+	menu.addBoutton("img\\delete.png",true,0,cparam.ysize-75,75,cparam.ysize);
+	menu.addBoutton("img\\move.png",true,75,cparam.ysize-75,150,cparam.ysize);
+	menu.addBoutton("img\\resize.png",true,150,cparam.ysize-75,225,cparam.ysize);
+
+	//init bouttons help/scan
+
+	//quit
+	quit.addBoutton("img\\quit.png",true,cparam.xsize-120,30,cparam.xsize-16,54+30,true);
+	quit.addBoutton("img\\quit1.png",true,cparam.xsize-120,30,cparam.xsize-16,54+30,false);
+	difQuit=differ(2000);
+
+	//help; 
+	help.addBoutton("img\\aide1.png",true, cparam.xsize-120,54+35,cparam.xsize-16,54+54+35,true);
+	help.addBoutton("img\\aide2.png",true, cparam.xsize-120,54+35,cparam.xsize-16,54+54+35,false); //activé
+	help.addBoutton("img\\aide3.png",true, cparam.xsize-120,54+35,cparam.xsize-16,54+54+35,false); //selectioné
+	difAide=differ(2000); 
+	menuShow=false;
+
+	//scan
+	scan.addBoutton("img\\scan5.png",true,cparam.xsize-120,54+40+54,cparam.xsize-16,54+54+54+40,true);
+	scan.addBoutton("img\\scan6.png",true,cparam.xsize-120,54+40+54,cparam.xsize-16,54+54+54+40,false);
+	scan.addBoutton("img\\scan7.png",true,cparam.xsize-120,54+40+54,cparam.xsize-16,54+54+54+40,false);
+	difScan=differ(2000);
+
+	/*FMOD_System_Create(&systemSon);
+	FMOD_System_Init(systemSon, 2, FMOD_INIT_NORMAL, NULL);
+	if(!FMOD_System_CreateSound(systemSon, "Data\\mouseclickDown.wav", FMOD_CREATESAMPLE, 0, &clickDown)) printf("chargement son: ok\n");
+	else printf("chargement son: echec\n");
+	if(!FMOD_System_CreateSound(systemSon, "Data\\mouseclickUp.wav", FMOD_CREATESAMPLE, 0, &clickUP)) printf("chargement son: ok\n");
+	else printf("chargement son: echec\n");*/
+
+	 difIndex=differ(2000);
+	 difMajeur=differ(2000);
+
+	printf("Fin initialisation\n");
+
+	argMainLoop(mouseClick, key, mainLoop);
+ 
 
     return EXIT_SUCCESS;
 }
